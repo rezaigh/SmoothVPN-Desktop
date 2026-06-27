@@ -1,0 +1,57 @@
+name: Build Windows App
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Fetch engine binaries (xray + tun2socks + wintun)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path src/main/resources/bin | Out-Null
+          Invoke-WebRequest "https://github.com/XTLS/Xray-core/releases/latest/download/Xray-windows-64.zip" -OutFile xray.zip
+          Expand-Archive xray.zip -DestinationPath xray-tmp -Force
+          Copy-Item xray-tmp/xray.exe src/main/resources/bin/xray.exe -Force
+          Invoke-WebRequest "https://github.com/xjasonlyu/tun2socks/releases/download/v2.6.0/tun2socks-windows-amd64.zip" -OutFile t2s.zip
+          Expand-Archive t2s.zip -DestinationPath t2s-tmp -Force
+          Copy-Item t2s-tmp/tun2socks-windows-amd64.exe src/main/resources/bin/tun2socks.exe -Force
+          Invoke-WebRequest "https://www.wintun.net/builds/wintun-0.14.1.zip" -OutFile wintun.zip
+          Expand-Archive wintun.zip -DestinationPath wintun-tmp -Force
+          Copy-Item wintun-tmp/wintun/bin/amd64/wintun.dll src/main/resources/bin/wintun.dll -Force
+          Get-ChildItem src/main/resources/bin | Format-Table Name,Length
+
+      - name: Build runnable app image
+        run: .\gradlew.bat createDistributable --no-daemon --stacktrace
+
+      - name: Package zip
+        shell: pwsh
+        run: Compress-Archive -Path build/compose/binaries/main/app/SmoothVPN -DestinationPath SmoothVPN-windows.zip -Force
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: SmoothVPN-windows
+          path: SmoothVPN-windows.zip
+          if-no-files-found: error
+
+      - name: Publish to 'latest' release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest Windows build
+          files: SmoothVPN-windows.zip
